@@ -1,23 +1,197 @@
-# 📈 Stock Market Prediction with Causal Inference
+# Multi-Asset Stock Prediction Research
 
+[![CI](https://github.com/rxj0102/multi-asset-stock-prediction-research/actions/workflows/ci.yml/badge.svg)](https://github.com/rxj0102/multi-asset-stock-prediction-research/actions/workflows/ci.yml)
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
-[![Jupyter](https://img.shields.io/badge/Jupyter-Notebook-orange.svg)](https://jupyter.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 
-A comprehensive machine learning project for predicting stock returns that goes beyond simple forecasting to explore causal relationships, feature stability, and transfer learning across multiple assets.
+An end-to-end research pipeline for predicting daily stock returns across multiple assets. Goes beyond standard forecasting to explore **causal relationships**, **feature stability**, **market regime detection**, and **cross-asset transfer learning**.
 
-## 🎯 Overview
+---
 
-This project implements an end-to-end data science pipeline for financial time series prediction, featuring:
+## Table of Contents
 
-- **Data Acquisition**: Real-time data from Yahoo Finance for 5 major stocks (AAPL, MSFT, JPM, XOM, AMZN)
-- **Feature Engineering**: 21 predictive features including technical indicators, volume metrics, and volatility measures
-- **Model Comparison**: 15+ machine learning models from simple linear regression to advanced ensembles
-- **Causal Analysis**: Granger causality tests to identify true predictive drivers
-- **Stability Analysis**: Tracking feature importance evolution over time
-- **Transfer Learning**: Cross-asset prediction experiments and meta-learning
+- [Overview](#overview)
+- [Project Structure](#project-structure)
+- [Quickstart](#quickstart)
+- [Configuration](#configuration)
+- [Features Engineered](#features-engineered)
+- [Models Implemented](#models-implemented)
+- [Research Extensions](#research-extensions)
+- [Key Findings](#key-findings)
+- [Development](#development)
 
-## 📊 Key Results
+---
+
+## Overview
+
+| Dimension | Detail |
+|-----------|--------|
+| **Assets** | AAPL, MSFT, JPM, XOM, AMZN + S&P 500 + VIX |
+| **Period** | 2015-01-01 → present (live via yfinance) |
+| **Features** | 21 engineered features per asset |
+| **Models** | 11+ algorithms (linear → stacking ensembles) |
+| **Research** | Granger causality · regime detection · transfer learning · concept drift |
+
+---
+
+## Project Structure
+
+```
+multi-asset-stock-prediction-research/
+├── .github/
+│   └── workflows/
+│       └── ci.yml                   # GitHub Actions CI (lint + test)
+├── config/
+│   └── config.yaml                  # All hyperparameters & experiment settings
+├── notebooks/
+│   └── 01_stock_prediction_research.ipynb   # Full end-to-end research notebook
+├── src/
+│   └── stock_prediction/
+│       ├── data/
+│       │   └── loader.py            # yfinance download & alignment
+│       ├── features/
+│       │   └── engineering.py       # Full feature pipeline
+│       ├── models/
+│       │   └── factory.py           # Model constructors, training, tuning
+│       └── utils/
+│           ├── config.py            # YAML config loader
+│           └── evaluation.py        # MSE / RMSE / MAE / R² metrics
+├── tests/
+│   ├── test_config.py
+│   ├── test_features.py
+│   └── test_models.py
+├── results/                         # Saved plots & artefacts (git-ignored)
+├── .gitignore
+├── LICENSE
+├── Makefile                         # Developer shortcuts
+├── pyproject.toml                   # Package metadata & tool config
+├── requirements.txt                 # Core dependencies
+└── requirements-dev.txt             # Dev / test dependencies
+```
+
+---
+
+## Quickstart
+
+### 1. Clone & install
+
+```bash
+git clone https://github.com/rxj0102/multi-asset-stock-prediction-research.git
+cd multi-asset-stock-prediction-research
+pip install -e ".[dev]"
+```
+
+### 2. Run the notebook
+
+```bash
+make notebook
+# Opens notebooks/01_stock_prediction_research.ipynb
+```
+
+### 3. Use the Python API directly
+
+```python
+from stock_prediction.utils.config import load_config
+from stock_prediction.data.loader import download_market_data, compute_returns_and_align
+from stock_prediction.features.engineering import build_features
+from stock_prediction.models.factory import (
+    get_linear_models, train_and_evaluate, train_test_split_time
+)
+
+cfg = load_config()
+dc = cfg["data"]
+
+stock_data, market_data, vix_data = download_market_data(
+    stocks=dc["stocks"],
+    market_index=dc["market_index"],
+    vix_index=dc["vix_index"],
+    start_date=dc["start_date"],
+)
+processed = compute_returns_and_align(stock_data, market_data, vix_data)
+model_data = build_features(processed, cfg["features"])
+
+ticker = "AAPL"
+X, y = model_data[ticker]["X"], model_data[ticker]["y"]
+X_tr, X_te, y_tr, y_te = train_test_split_time(X, y)
+
+results = train_and_evaluate(get_linear_models(cfg["modelling"]["linear"]), X_tr, X_te, y_tr, y_te)
+print(results)
+```
+
+---
+
+## Configuration
+
+All experiment settings live in `config/config.yaml`. No code changes needed to adjust assets, date range, model hyperparameters, or research settings:
+
+```yaml
+data:
+  stocks: ["AAPL", "MSFT", "JPM", "XOM", "AMZN"]
+  start_date: "2015-01-01"
+
+modelling:
+  train_test_split: 0.8
+  tree:
+    n_estimators: 200
+    learning_rate: 0.05
+```
+
+---
+
+## Features Engineered
+
+### Price-Based (6)
+
+| Feature | Description |
+|---------|-------------|
+| `Return_Lag_1` | Previous day's log-return |
+| `Return_Lag_3` | 3-day rolling mean of returns |
+| `Return_Lag_5` | 5-day rolling mean of returns |
+| `MA_5` | 5-day simple moving average |
+| `MA_20` | 20-day simple moving average |
+| `Momentum` | MA_5 − MA_20 |
+
+### Volume-Based (5 core + 4 enhanced = 9)
+
+| Feature | Description |
+|---------|-------------|
+| `Volume_Change` | Daily volume % change |
+| `Avg_Volume_5/20` | Rolling average volume |
+| `Volume_Surprise` | Volume / 20-day avg (liquidity shock) |
+| `Dollar_Volume` | Close × Volume |
+| `Return_x_Volume` | Return_Lag_1 × Volume_Surprise |
+| `Momentum_x_Volume` | Momentum × Volume_Surprise |
+| `Dollar_Volume_Norm` | Dollar volume / rolling 20-day avg |
+| `High_Volume_Day` | Binary: Volume_Surprise > 1.2 |
+
+### Volatility (4)
+
+| Feature | Description |
+|---------|-------------|
+| `Daily_Range` | (High − Low) / Close |
+| `RV_5 / RV_20` | 5/20-day realised volatility |
+| `ATR_5` | 5-day average true range |
+
+### Market (2)
+
+| Feature | Description |
+|---------|-------------|
+| `Market_Return` | S&P 500 daily log-return |
+| `VIX_Change` | VIX daily % change |
+
+---
+
+## Models Implemented
+
+| Category | Models |
+|----------|--------|
+| **Linear** | LinearRegression · Ridge · Lasso · ElasticNet |
+| **Tree** | RandomForest · GradientBoosting · ExtraTrees · XGBoost · LightGBM |
+| **Ensemble** | VotingRegressor · StackingRegressor (LR meta-model) |
+| **Tuned** | RandomizedSearchCV hybrid ensemble |
+
+### Benchmark Results (MSE, test set)
 
 | Model | AAPL | MSFT | JPM | XOM | AMZN |
 |-------|------|------|-----|-----|------|
@@ -27,115 +201,48 @@ This project implements an end-to-end data science pipeline for financial time s
 | LightGBM | 0.000337 | 0.000230 | 0.000393 | 0.000241 | 0.000469 |
 | Stacking Ensemble | 0.000299 | 0.000196 | 0.000288 | 0.000194 | 0.000393 |
 
-**Regularized linear models (Lasso/ElasticNet) generally outperform complex tree-based models**, suggesting a strong linear component in daily returns.
+---
 
-# 🎯 Features Engineered
+## Research Extensions
 
-## Price-Based Features
+### 1. Granger Causality Analysis
+Tests which features statistically Granger-cause next-day returns.
+**Finding**: `Market_Return` (p=0.0007) and `RV_5` (p=0.0166) are causal drivers for AAPL.
 
-| Feature | Description |
-|---------|-------------|
-| Return_Lag_1 | Previous day's return |
-| Return_Lag_3 | 3-day moving average of returns |
-| Return_Lag_5 | 5-day moving average of returns |
-| MA_5 | 5-day simple moving average |
-| MA_20 | 20-day simple moving average |
-| Momentum | MA_5 - MA_20 |
+### 2. Feature Stability & Concept Drift
+Rolling 2-year windows track how feature importance evolves.
+**Finding**: Importances spike during market turmoil (COVID 2020, bear market 2022).
 
-## Volume-Based Features
+### 3. Transfer Learning
+Cross-asset prediction: train on one stock, predict another.
+**Finding**: Largely ineffective; return correlation (r=0.267) and feature similarity (r=0.144) are the key transferability proxies.
 
-| Feature | Description |
-|---------|-------------|
-| Volume_Change | Daily volume % change |
-| Avg_Volume_5 | 5-day average volume |
-| Avg_Volume_20 | 20-day average volume |
-| Volume_Surprise | Volume / 20-day avg volume |
-| Dollar_Volume | Close × Volume |
-| Return_x_Volume | Return_Lag_1 × Volume_Surprise |
-| Momentum_x_Volume | Momentum × Volume_Surprise |
-| Dollar_Volume_Norm | Dollar volume / 20-day avg |
-| High_Volume_Day | Volume_Surprise > 1.2 |
+### 4. Market Regime Detection
+GMM/KMeans clustering on return distributions identifies 3 regimes (normal / high-return / low-return).
+**Finding**: ~85% of days fall in the normal regime; regime-conditional models outperform on tail regimes.
 
-## Volatility Features
+### 5. Temporal Dynamics
+Time-varying coefficient analysis reveals non-stationarity.
+**Finding**: Feature importance structure shifts significantly post-2020.
 
-| Feature | Description |
-|---------|-------------|
-| Daily_Range | (High - Low) / Close |
-| RV_5 | 5-day rolling std of returns |
-| RV_20 | 20-day rolling std of returns |
-| ATR_5 | 5-day average true range |
+---
 
-## Market Features
+## Key Findings
 
-| Feature | Description |
-|---------|-------------|
-| Market_Return | S&P 500 daily return |
-| VIX_Change | VIX index daily % change |
+1. **Simple beats complex** — Regularised linear models (Lasso/ElasticNet) generally outperform tree-based models, implying a strong linear component in daily returns.
+2. **Market context dominates** — `Market_Return` and `VIX_Change` are consistently the highest-importance features.
+3. **Regimes matter** — A single model fitted on all regimes leaves alpha on the table for tail environments.
+4. **Transferability is low** — Equity return distributions are largely asset-specific; cross-stock models add limited value.
 
-# 🤖 Models Implemented
+---
 
-## Linear Models
+## Development
 
-| Model | Description |
-|-------|-------------|
-| Linear Regression | Baseline model |
-| Ridge Regression | L2 regularization |
-| Lasso Regression | L1 regularization + feature selection |
-| ElasticNet | Combined L1/L2 regularization |
-
-## Tree-Based Models
-
-| Model | Description |
-|-------|-------------|
-| Random Forest | 200 trees with bootstrap aggregation |
-| Gradient Boosting | Sequential error correction |
-| Extra Trees | Random splits for variance reduction |
-| XGBoost | Optimized gradient boosting |
-| LightGBM | Lightweight leaf-wise growth |
-
-## Ensemble Methods
-
-| Model | Description |
-|-------|-------------|
-| Voting Regressor | Average of all tree-based models |
-| Stacking Regressor | Linear regression as meta-model |
-| Hybrid Ensemble | Tuned models + stacking (Cell 15) |
-
-# 🔬 Advanced Analysis
-
-## 1. Causal Inference (Cell 17)
-
-```python
-# Tests if features Granger-cause returns
-grangercausalitytests(data, maxlag=5)
+```bash
+make install-dev   # install package + dev tools
+make lint          # ruff linting
+make format        # black auto-format
+make test          # pytest
+make test-cov      # pytest + coverage report
+make clean         # remove build artefacts
 ```
-
-**Key Finding**: For AAPL, `Market_Return` (p=0.0007) and `RV_5` (p=0.0166) Granger-cause returns at 5% significance.
-
-## 2. Feature Stability (Cell 18)
-
-- Rolling 2-year windows track importance evolution
-- Coefficient of variation measures stability
-- Structural break detection via statistical tests
-
-**Key Finding**: Feature importances spike during market turmoil (2020 COVID crash, 2022 bear market).
-
-## 3. Transfer Learning (Cell 19)
-
-- Cross-stock prediction experiments
-- Transferability heatmap visualization
-- Meta-learning to predict transfer success
-
-**Key Finding**: Cross-asset prediction is largely ineffective, but return correlation (r=0.267) and feature similarity (r=0.144) are key transferability factors.
-
-# 📊 Visualizations
-
-| Visualization | Description | Location |
-|---------------|-------------|----------|
-| Model Comparison | MSE metrics for all models | Cell 14 |
-| Feature Importance | Top features per stock | Cell 14 |
-| Granger Causality | Causal driver summary | Cell 17 |
-| Feature Stability | Importance evolution over time | Cell 18 |
-| Instability Timeline | Volatility of feature importance | Cell 18 |
-| Transfer Heatmap | Cross-stock R² scores | Cell 19 |
-| Meta-Feature Importance | Transfer success factors | Cell 19 |
