@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 
+logger = logging.getLogger(__name__)
 
-# ── Base feature sets ────────────────────────────────────────────────────────
+
+# ── Base feature sets (default windows) ──────────────────────────────────────
 
 PRICE_FEATURES = [
-    "Return_Lag_1", "Return_Lag_3", "Return_Lag_5",
+    "Return_Lag_1", "Return_RollMean_3", "Return_RollMean_5",
     "MA_5", "MA_20", "Momentum",
 ]
 
@@ -46,23 +49,30 @@ def add_price_features(
     lag_windows: list[int] | None = None,
     ma_windows: list[int] | None = None,
 ) -> pd.DataFrame:
-    """Add lagged returns and moving-average momentum features."""
+    """Add lagged returns and moving-average momentum features.
+
+    For ``lag_windows``, window=1 produces a true lag (shift); all other
+    windows produce a rolling mean (``Return_RollMean_<w>``).
+    """
     lag_windows = lag_windows or [1, 3, 5]
     ma_windows = ma_windows or [5, 20]
 
+    n_before = len(df)
     temp = df.copy()
     for w in lag_windows:
         if w == 1:
             temp["Return_Lag_1"] = temp["Return"].shift(1)
         else:
-            temp[f"Return_Lag_{w}"] = temp["Return"].rolling(w).mean()
+            temp[f"Return_RollMean_{w}"] = temp["Return"].rolling(w).mean()
 
     short_w, long_w = ma_windows[0], ma_windows[1]
     temp[f"MA_{short_w}"] = temp["Close"].rolling(short_w).mean()
     temp[f"MA_{long_w}"] = temp["Close"].rolling(long_w).mean()
     temp["Momentum"] = temp[f"MA_{short_w}"] - temp[f"MA_{long_w}"]
 
-    return temp.dropna()
+    result = temp.dropna()
+    logger.debug("add_price_features: %d → %d rows (dropped %d)", n_before, len(result), n_before - len(result))
+    return result
 
 
 def add_volume_features(
@@ -73,6 +83,7 @@ def add_volume_features(
     """Add volume-based liquidity and activity features."""
     avg_windows = avg_windows or [5, 20]
 
+    n_before = len(df)
     temp = df.copy()
     temp["Volume_Change"] = temp["Volume"].pct_change()
 
@@ -83,7 +94,9 @@ def add_volume_features(
     temp["Volume_Surprise"] = temp["Volume"] / temp[f"Avg_Volume_{long_w}"]
     temp["Dollar_Volume"] = temp["Close"] * temp["Volume"]
 
-    return temp.dropna()
+    result = temp.dropna()
+    logger.debug("add_volume_features: %d → %d rows (dropped %d)", n_before, len(result), n_before - len(result))
+    return result
 
 
 def add_volatility_features(
@@ -91,19 +104,34 @@ def add_volatility_features(
     rv_windows: list[int] | None = None,
     atr_window: int = 5,
 ) -> pd.DataFrame:
-    """Add realised-volatility and price-range features."""
+    """Add realised-volatility and price-range features.
+
+    ATR is computed as the rolling mean of the True Range, where True Range
+    = max(High - Low, |High - prev_Close|, |Low - prev_Close|).
+    """
     rv_windows = rv_windows or [5, 20]
 
+    n_before = len(df)
     temp = df.copy()
     temp["Daily_Range"] = (temp["High"] - temp["Low"]) / temp["Close"]
 
     for w in rv_windows:
         temp[f"RV_{w}"] = temp["Return"].rolling(w).std()
 
-    temp["True_Range"] = temp["High"] - temp["Low"]
-    temp[f"ATR_{atr_window}"] = temp["True_Range"].rolling(atr_window).mean()
+    prev_close = temp["Close"].shift(1)
+    true_range = pd.concat(
+        [
+            temp["High"] - temp["Low"],
+            (temp["High"] - prev_close).abs(),
+            (temp["Low"] - prev_close).abs(),
+        ],
+        axis=1,
+    ).max(axis=1)
+    temp[f"ATR_{atr_window}"] = true_range.rolling(atr_window).mean()
 
-    return temp.dropna()
+    result = temp.dropna()
+    logger.debug("add_volatility_features: %d → %d rows (dropped %d)", n_before, len(result), n_before - len(result))
+    return result
 
 
 def add_volume_enhanced_features(
@@ -111,12 +139,18 @@ def add_volume_enhanced_features(
     high_volume_threshold: float = 1.2,
 ) -> pd.DataFrame:
     """Add interaction and normalisation features that combine volume and price."""
+    n_before = len(df)
     temp = df.copy()
     temp["Return_x_Volume"] = temp["Return_Lag_1"] * temp["Volume_Surprise"]
     temp["Momentum_x_Volume"] = temp["Momentum"] * temp["Volume_Surprise"]
     temp["Dollar_Volume_Norm"] = temp["Dollar_Volume"] / temp["Dollar_Volume"].rolling(20).mean()
     temp["High_Volume_Day"] = (temp["Volume_Surprise"] > high_volume_threshold).astype(int)
-    return temp.dropna()
+    result = temp.dropna()
+    logger.debug(
+        "add_volume_enhanced_features: %d → %d rows (dropped %d)",
+        n_before, len(result), n_before - len(result),
+    )
+    return result
 
 
 def build_target(df: pd.DataFrame) -> pd.DataFrame:
@@ -154,30 +188,36 @@ def build_features(
     vola_cfg = cfg.get("volatility", {})
     high_vol_thr = vol_cfg.get("high_volume_threshold", 1.2)
 
+    lag_windows = price_cfg.get("lag_windows") or [1, 3, 5]
+    ma_windows = price_cfg.get("ma_windows") or [5, 20]
+    avg_windows = vol_cfg.get("avg_windows") or [5, 20]
+    rv_windows = vola_cfg.get("rv_windows") or [5, 20]
+    atr_window = vola_cfg.get("atr_window", 5)
+
+    # Build feature column list dynamically from the configured windows so
+    # that changes to window sizes in config are always reflected in X.
+    lag_feats = ["Return_Lag_1"] + [f"Return_RollMean_{w}" for w in lag_windows if w != 1]
+    ma_feats = [f"MA_{w}" for w in ma_windows] + ["Momentum"]
+    vol_feats = (
+        ["Volume_Change"]
+        + [f"Avg_Volume_{w}" for w in avg_windows]
+        + ["Volume_Surprise", "Dollar_Volume"]
+    )
+    vola_feats = ["Daily_Range"] + [f"RV_{w}" for w in rv_windows] + [f"ATR_{atr_window}"]
+    feature_cols = lag_feats + ma_feats + vol_feats + vola_feats + MARKET_FEATURES + VOLUME_ENHANCED_FEATURES
+
     final_model_data: Dict[str, Dict[str, pd.DataFrame]] = {}
 
     for ticker, df in processed_data.items():
-        temp = add_price_features(
-            df,
-            lag_windows=price_cfg.get("lag_windows"),
-            ma_windows=price_cfg.get("ma_windows"),
-        )
-        temp = add_volume_features(
-            temp,
-            avg_windows=vol_cfg.get("avg_windows"),
-            high_volume_threshold=high_vol_thr,
-        )
-        temp = add_volatility_features(
-            temp,
-            rv_windows=vola_cfg.get("rv_windows"),
-            atr_window=vola_cfg.get("atr_window", 5),
-        )
+        logger.info("Building features for %s (input rows: %d)", ticker, len(df))
+        temp = add_price_features(df, lag_windows=lag_windows, ma_windows=ma_windows)
+        temp = add_volume_features(temp, avg_windows=avg_windows, high_volume_threshold=high_vol_thr)
+        temp = add_volatility_features(temp, rv_windows=rv_windows, atr_window=atr_window)
         temp = add_volume_enhanced_features(temp, high_vol_thr)
         temp = build_target(temp)
 
-        X = temp[ALL_FEATURES].copy()
-        if "Price" in X.columns:
-            X.drop(columns=["Price"], inplace=True)
+        X = temp[feature_cols].copy()
+        logger.info("Features built for %s: %d rows × %d cols", ticker, len(X), X.shape[1])
 
         final_model_data[ticker] = {
             "X": X,

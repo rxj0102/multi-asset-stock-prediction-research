@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
@@ -15,12 +16,14 @@ from sklearn.ensemble import (
 )
 from sklearn.linear_model import ElasticNet, Lasso, LinearRegression, Ridge
 from sklearn.metrics import mean_squared_error
-from sklearn.model_selection import RandomizedSearchCV
+from sklearn.model_selection import RandomizedSearchCV, TimeSeriesSplit
 
 import lightgbm as lgb
 import xgboost as xgb
 
 from ..utils.evaluation import evaluate_predictions
+
+logger = logging.getLogger(__name__)
 
 
 # ── Model constructors ────────────────────────────────────────────────────────
@@ -45,12 +48,19 @@ def get_tree_models(cfg: Dict[str, Any] | None = None) -> Dict[str, Any]:
     n = cfg.get("n_estimators", 200)
     lr = cfg.get("learning_rate", 0.05)
     rs = cfg.get("random_state", 42)
+    max_depth = cfg.get("max_depth", None)
     return {
-        "RandomForest": RandomForestRegressor(n_estimators=n, random_state=rs),
-        "GradientBoosting": GradientBoostingRegressor(n_estimators=n, learning_rate=lr, random_state=rs),
-        "ExtraTrees": ExtraTreesRegressor(n_estimators=n, random_state=rs),
-        "XGBoost": xgb.XGBRegressor(n_estimators=n, learning_rate=lr, random_state=rs, verbosity=0),
-        "LightGBM": lgb.LGBMRegressor(n_estimators=n, learning_rate=lr, random_state=rs, verbose=-1),
+        "RandomForest": RandomForestRegressor(n_estimators=n, max_depth=max_depth, random_state=rs),
+        "GradientBoosting": GradientBoostingRegressor(
+            n_estimators=n, learning_rate=lr, max_depth=max_depth or 3, random_state=rs
+        ),
+        "ExtraTrees": ExtraTreesRegressor(n_estimators=n, max_depth=max_depth, random_state=rs),
+        "XGBoost": xgb.XGBRegressor(
+            n_estimators=n, learning_rate=lr, max_depth=max_depth or 6, random_state=rs, verbosity=0
+        ),
+        "LightGBM": lgb.LGBMRegressor(
+            n_estimators=n, learning_rate=lr, max_depth=max_depth or -1, random_state=rs, verbose=-1
+        ),
     }
 
 
@@ -58,7 +68,7 @@ def get_ensemble_models(cfg: Dict[str, Any] | None = None) -> Dict[str, Any]:
     """Return Voting and Stacking ensemble models."""
     cfg = cfg or {}
     n = cfg.get("voting_n_estimators", 100)
-    rs = 42
+    rs = cfg.get("random_state", 42)
 
     base = [
         ("rf", RandomForestRegressor(n_estimators=n, random_state=rs)),
@@ -105,9 +115,12 @@ def train_and_evaluate(
     """
     results: Dict[str, Dict[str, float]] = {}
     for name, model in models.items():
+        logger.info("Training %s", name)
         model.fit(X_train, y_train)
         preds = model.predict(X_test)
-        results[name] = evaluate_predictions(y_test, preds)
+        metrics = evaluate_predictions(y_test, preds)
+        results[name] = metrics
+        logger.info("%s — RMSE=%.6f  R²=%.4f", name, metrics["rmse"], metrics["r2"])
     return results
 
 
@@ -122,18 +135,24 @@ def tune_model(
 ) -> Any:
     """Randomised hyperparameter search with time-series-safe CV.
 
+    Uses :class:`~sklearn.model_selection.TimeSeriesSplit` to avoid
+    look-ahead bias during cross-validation.
+
     Returns
     -------
     Best estimator (fitted).
     """
+    tscv = TimeSeriesSplit(n_splits=cv)
     search = RandomizedSearchCV(
         model,
         param_distributions=param_grid,
         n_iter=n_iter,
-        cv=cv,
+        cv=tscv,
         scoring="neg_mean_squared_error",
         random_state=random_state,
         n_jobs=-1,
     )
+    logger.info("Tuning %s with %d iterations and %d CV splits", type(model).__name__, n_iter, cv)
     search.fit(X_train, y_train)
+    logger.info("Best params: %s", search.best_params_)
     return search.best_estimator_

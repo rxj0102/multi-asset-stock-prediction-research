@@ -9,7 +9,7 @@ from typing import Any, Dict
 import yaml
 
 
-_DEFAULT_CONFIG_PATH = Path(__file__).parents[4] / "config" / "config.yaml"
+_DEFAULT_CONFIG_PATH = Path(__file__).parents[3] / "config" / "config.yaml"
 
 
 def load_config(path: str | Path | None = None) -> Dict[str, Any]:

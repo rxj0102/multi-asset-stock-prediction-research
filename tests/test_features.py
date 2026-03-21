@@ -48,7 +48,7 @@ def processed_data(sample_ohlcv):
 
 def test_add_price_features_columns(sample_ohlcv):
     result = add_price_features(sample_ohlcv.dropna())
-    for col in ["Return_Lag_1", "Return_Lag_3", "Return_Lag_5", "MA_5", "MA_20", "Momentum"]:
+    for col in ["Return_Lag_1", "Return_RollMean_3", "Return_RollMean_5", "MA_5", "MA_20", "Momentum"]:
         assert col in result.columns, f"Missing column: {col}"
 
 

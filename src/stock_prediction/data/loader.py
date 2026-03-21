@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
 import pandas as pd
 import yfinance as yf
+
+logger = logging.getLogger(__name__)
 
 
 def _flatten_columns(df: pd.DataFrame) -> pd.DataFrame:
@@ -22,9 +25,19 @@ def download_stock(
     end_date: Optional[str] = None,
 ) -> pd.DataFrame:
     """Download OHLCV data for a single ticker via yfinance."""
+    logger.info("Downloading %s from %s to %s", ticker, start_date, end_date or "today")
     df = yf.download(ticker, start=start_date, end=end_date, progress=False)
     df = _flatten_columns(df)
+    if df.empty:
+        raise ValueError(
+            f"No data returned for ticker '{ticker}' between {start_date} and "
+            f"{end_date or 'today'}. Check the ticker symbol and date range."
+        )
+    n_before = len(df)
     df.dropna(inplace=True)
+    if len(df) < n_before:
+        logger.warning("%s: dropped %d rows with NaN values (%d rows remain)", ticker, n_before - len(df), len(df))
+    logger.info("%s: %d rows downloaded", ticker, len(df))
     return df
 
 
@@ -101,6 +114,13 @@ def compute_returns_and_align(
         temp["Return"] = np.log(temp["Close"] / temp["Close"].shift(1))
         temp = temp.join(market_data[["Market_Return"]], how="inner")
         temp = temp.join(vix_data[["VIX_Change"]], how="inner")
+        n_before = len(temp)
         temp.dropna(inplace=True)
+        if len(temp) < n_before:
+            logger.warning(
+                "%s: dropped %d rows during alignment (%d rows remain)",
+                ticker, n_before - len(temp), len(temp),
+            )
+        logger.info("%s: %d rows after alignment", ticker, len(temp))
         processed[ticker] = temp
     return processed

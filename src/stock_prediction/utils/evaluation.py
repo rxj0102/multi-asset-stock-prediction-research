@@ -31,7 +31,6 @@ def evaluate_predictions(
 
 def results_to_dataframe(
     results: Dict[str, Dict[str, float]],
-    metric: str = "mse",
 ) -> pd.DataFrame:
     """Convert a nested results dict to a tidy DataFrame.
 
@@ -39,8 +38,6 @@ def results_to_dataframe(
     ----------
     results:
         ``{ticker: {model_name: score}}``
-    metric:
-        Column label for the score values.
 
     Returns
     -------
