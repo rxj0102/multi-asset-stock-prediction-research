@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict
 
 import pandas as pd
 
@@ -71,7 +71,7 @@ def add_price_features(
     temp["Momentum"] = temp[f"MA_{short_w}"] - temp[f"MA_{long_w}"]
 
     result = temp.dropna()
-    logger.debug("add_price_features: %d → %d rows (dropped %d)", n_before, len(result), n_before - len(result))
+    logger.debug("add_price_features: %d \u2192 %d rows (dropped %d)", n_before, len(result), n_before - len(result))
     return result
 
 
@@ -95,7 +95,7 @@ def add_volume_features(
     temp["Dollar_Volume"] = temp["Close"] * temp["Volume"]
 
     result = temp.dropna()
-    logger.debug("add_volume_features: %d → %d rows (dropped %d)", n_before, len(result), n_before - len(result))
+    logger.debug("add_volume_features: %d \u2192 %d rows (dropped %d)", n_before, len(result), n_before - len(result))
     return result
 
 
@@ -130,7 +130,7 @@ def add_volatility_features(
     temp[f"ATR_{atr_window}"] = true_range.rolling(atr_window).mean()
 
     result = temp.dropna()
-    logger.debug("add_volatility_features: %d → %d rows (dropped %d)", n_before, len(result), n_before - len(result))
+    logger.debug("add_volatility_features: %d \u2192 %d rows (dropped %d)", n_before, len(result), n_before - len(result))
     return result
 
 
@@ -147,7 +147,7 @@ def add_volume_enhanced_features(
     temp["High_Volume_Day"] = (temp["Volume_Surprise"] > high_volume_threshold).astype(int)
     result = temp.dropna()
     logger.debug(
-        "add_volume_enhanced_features: %d → %d rows (dropped %d)",
+        "add_volume_enhanced_features: %d \u2192 %d rows (dropped %d)",
         n_before, len(result), n_before - len(result),
     )
     return result
@@ -217,7 +217,7 @@ def build_features(
         temp = build_target(temp)
 
         X = temp[feature_cols].copy()
-        logger.info("Features built for %s: %d rows × %d cols", ticker, len(X), X.shape[1])
+        logger.info("Features built for %s: %d rows \u00d7 %d cols", ticker, len(X), X.shape[1])
 
         final_model_data[ticker] = {
             "X": X,

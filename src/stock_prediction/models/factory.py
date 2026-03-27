@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
 import numpy as np
 import pandas as pd
@@ -15,7 +15,6 @@ from sklearn.ensemble import (
     VotingRegressor,
 )
 from sklearn.linear_model import ElasticNet, Lasso, LinearRegression, Ridge
-from sklearn.metrics import mean_squared_error
 from sklearn.model_selection import RandomizedSearchCV, TimeSeriesSplit
 
 import lightgbm as lgb
@@ -120,7 +119,7 @@ def train_and_evaluate(
         preds = model.predict(X_test)
         metrics = evaluate_predictions(y_test, preds)
         results[name] = metrics
-        logger.info("%s — RMSE=%.6f  R²=%.4f", name, metrics["rmse"], metrics["r2"])
+        logger.info("%s \u2014 RMSE=%.6f  R\u00b2=%.4f", name, metrics["rmse"], metrics["r2"])
     return results
 
 
